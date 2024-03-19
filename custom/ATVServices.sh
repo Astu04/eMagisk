@@ -4,6 +4,7 @@
 POGOPKG=com.nianticlabs.pokemongo
 CONFIGFILE='/data/local/tmp/emagisk.config'
 setprop net.dns1 1.1.1.1 && setprop net.dns2 8.8.8.8
+get_config
 
 # Check for the mitm pkg
 
@@ -184,7 +185,7 @@ webhook() {
 
 # Recheck if $CONFIGFILE exists and has data. Repulls data and checks the RDM connection status.
 
-configfile_rdm() {
+get_config() {
 	if [[ -s $CONFIGFILE ]]; then
 		log -p i -t eMagiskATVService "$CONFIGFILE exists and has data. Data will be pulled."
 		source $CONFIGFILE
@@ -401,7 +402,7 @@ if result=$(check_mitmpkg); then
 		counter=0
 		rdmDeviceID=1
 		log -p i -t eMagiskATVService "Start counter at $counter"
-		configfile_rdm
+		get_config
 		# Check for updates
 		if [ "$autoupdate" = "true" ]; then
 		  log -p i -t eMagiskATVService "[AUTOUPDATE] Checking for new updates"
