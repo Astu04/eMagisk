@@ -550,125 +550,52 @@ function _set_prompt() {
 
 PROMPT_COMMAND='_set_prompt'
 
+######## Astu stuff
+########
+########
 export ANDROID_DATA=/data;
 export ANDROID_ROOT=/data;
 
-get_mitm_pkg() { # This function is so hardcoded that I'm allergic to it
-    busybox ps aux | grep -E -C0 "pokemod|gocheats|sy1vi3" | grep -C0 -v grep | awk -F ' ' '/com.pokemod/{print $NF} /com.sy1vi3/{print $NF} /com.gocheats.launcher/{print $NF}' | grep -E -C0 "gocheats|pokemod|sy1vi3" | sed -e 's/^[0-9]*://' -e 's@:.*@@g' | sort | uniq
-}
-MITMPKG=$(get_mitm_pkg)
-POGOPKG=com.nianticlabs.pokemongo
-
-mitm_stop() {
-        am force-stop $POGOPKG
-        killall $POGOPKG
-        if [ $MITMPKG = "com.gocheats.launcher" ]; then
-                am force-stop $MITMPKG
-        else
-                am stopservice $MITMPKG/com.pokemod.atlas.services.MappingService
-                am force-stop $MITMPKG
-        fi
-}
-
-mitm_start() {
-        killall $POGOPKG
-        if [ $MITMPKG = "package:com.gocheats.launcher" ]; then
-                monkey -p $MITMPKG 1
-        else
-                am startservice $MITMPKG/com.pokemod.atlas.services.MappingService
-        fi
-}
-
-mitm_restart() {
-    mitm_stop
-    sleep 5
-    mitm_start
-}
-
-# Send a webhook to discord if it's configured
-CONFIGFILE='/data/local/tmp/emagisk.config'
-webhook() {
-    if [[ -s $CONFIGFILE ]]; then
-        source $CONFIGFILE
-        export discord_webhook
+get_mitm_pkg() { 
+    local mitm_pkg
+    mitm_pkg=$(busybox ps aux | grep -E -C0 "pokemod|gocheats|sy1vi3" | grep -C0 -v grep | awk -F ' ' '/com.pokemod/{print $NF} /com.sy1vi3/{print $NF} /com.gocheats.launcher/{print $NF}' | grep -E -C0 "gocheats|pokemod|sy1vi3" | sed -e 's/^[0-9]*://' -e 's@:.*@@g' | sort | uniq)
+    if [ -z "$mitm_pkg" ]; then
+        echo "NOT RUNNING"
     else
-        echo "Failed to pull the config file info. Make sure $($CONFIGFILE) exists and has the correct data."
+        echo "$mitm_pkg"
     fi
-
-    # Check if discord_webhook variable is set
-    if [[ -z "$discord_webhook" ]]; then
-        echo "discord_webhook variable is not set in $($CONFIGFILE). Cannot send webhook."
-        return
-    fi
-
-    # Check internet connectivity by pinging 8.8.8.8 and 1.1.1.1
-    if ! ping -c 1 -W 1 8.8.8.8 >/dev/null && ! ping -c 1 -W 1 1.1.1.1 >/dev/null; then
-        echo "No internet connectivity. Skipping webhook."
-        return
-    fi
-
-    local message="$1"
-    local local_ip="$(ip route get 1.1.1.1 | awk '{print $7}')"
-    local wan_ip="$(curl -s -k https://ipinfo.io/ip)"
-    local mac_address="$(ip link show eth0 | awk '/ether/ {print $2}')"
-    local mac_address_nodots="$(ip link show eth0 | awk '/ether/ {print $2}' | tr -d ':')"
-    local timestamp="$(date +%Y-%m-%d_%H-%M-%S)"
-    local mitm_version="NOT INSTALLED"
-    local pogo_version="NOT INSTALLED"
-    local agent=""
-    local playStoreVersion=""
-    local temperature="$(cat /sys/class/thermal/thermal_zone0/temp | awk '{print substr($0, 1, length($0)-3)}')"
-    playStoreVersion=$(dumpsys package com.android.vending | grep versionName | head -n 1 | cut -d "=" -f 2 | cut -d " " -f 1)
-
-    mitmDeviceName="NO NAME"
-    if [ -f /data/local/tmp/atlas_config.json ]; then
-        mitmDeviceName=$(cat /data/local/tmp/atlas_config.json | awk -F\" '{print $12}')
-    else
-        mitmDeviceName=$(cat /data/local/tmp/config.json | awk -F\" '/device_name/ {print $4}')
-    fi
-
-    # Get mitm version
-    mitm_version="$(dumpsys package "$MITMPKG" | awk -F "=" '/versionName/ {print $2}')"
-
-    # Get pogo version
-    pogo_version="$(dumpsys package com.nianticlabs.pokemongo | awk -F "=" '/versionName/ {print $2}')"
-
-    # Create a temporary directory to store the files
-    local temp_dir="/data/local/tmp/webhook_${timestamp}"
-    mkdir "$temp_dir"
-
-    # Retrieve the logcat logs
-    logcat -v colors -d > "$temp_dir/logcat_${MITMPKG}_${timestamp}_${mac_address_nodots}_selfSentLog.log"
-
-    # Create the payload JSON
-    local payload_json="{\"username\":\"$mitmDeviceName\",\"content\":\"$message"
-        payload_json+="\n*Device name*: $mitmDeviceName"
-        payload_json+="\nLocal IP: ||$local_ip||"
-        payload_json+="\nWAN IP: ||$wan_ip||"
-        payload_json+="\nmac: $mac_address"
-        payload_json+="\nTemp: $temperature"
-        payload_json+="\nmitm: $MITMPKG"
-        payload_json+="\nmitm version: $mitm_version"
-        if [[ -n "$agent" ]]; then
-                payload_json+="\nmitm agent: $agent"
-        fi
-        payload_json+="\npogo version: $pogo_version"
-        payload_json+="\nPlay Store version: $playStoreVersion"
-        payload_json+="\"}"
-
-        log -p i -t eMagiskATVService "Sending discord webhook"
-    # Upload the payload JSON and logcat logs to Discord
-        if [[ $MITMPKG == com.pokemod.atlas* ]]; then
-                cp /data/local/tmp/atlas.log "$temp_dir/atlas.log"
-                truncate -s 7M "$temp_dir/atlas.log"
-                curl -X POST -k -H "Content-Type: multipart/form-data" -F "payload_json=$payload_json" "$discord_webhook" -F "atlaslog=@$temp_dir/atlas.log" -F "logcat=@$temp_dir/logcat_${MITMPKG}_${timestamp}_${mac_address_nodots}_selfSentLog.log"
-        else
-                curl -X POST -k -H "Content-Type: multipart/form-data" -F "payload_json=$payload_json" "$discord_webhook" -F "logcat=@$temp_dir/logcat_${MITMPKG}_${timestamp}_${mac_address_nodots}_selfSentLog.log"
-        fi
-    # Clean up temporary files
-    rm -rf "$temp_dir"
 }
 
 temperature() {
     cat /sys/class/thermal/thermal_zone0/temp | busybox awk '{print substr($0, 1, length($0)-3)}'
 }
+
+MITMPKG=$(get_mitm_pkg)
+POGOPKG=com.nianticlabs.pokemongo
+androidVersion=$(getprop ro.build.version.release)
+mitm_version="NOT INSTALLED"
+pogo_version="NOT INSTALLED"
+
+pogo_version="$(dumpsys package com.nianticlabs.pokemongo | awk -F "=" '/versionName/ {print $2}')"
+
+if [ "$MITMPKG" != "NOT RUNNING" ]; then
+    mitm_version="$(dumpsys package "$MITMPKG" | awk -F "=" '/versionName/ {print $2}')"
+    echo "Android $androidVersion. Pogo: $pogo_version. MITM: $MITMPKG ($mitm_version). Temperature: $(temperature)"
+else
+    echo "Android $androidVersion. Pogo: $pogo_version. MITM: $MITMPKG. Temperature: $(temperature)"
+fi
+
+# Print most recent logs of MITM on shell login
+# TODO: Cosmog
+if [ -e "/data/local/tmp/aegis.log" ]; then
+    log_path='/data/local/tmp/aegis.log'
+    busybox tail $log_path
+elif [ -e "/data/local/tmp/atlas.log" ]; then
+    log_path='/data/local/tmp/atlas.log'
+    busybox tail $log_path
+elif [ "$MITMPKG" = "com.gocheats.launcher" ]; then
+    # logcat_output=$(busybox logcat -d | grep 'GoCheats')
+    # echo "$logcat_output"
+    log_path=$(find /data/data/com.nianticlabs.pokemongo/cache/ -name "Exeggcute_*log" | tail -n1)
+    busybox tail $log_path
+fi
