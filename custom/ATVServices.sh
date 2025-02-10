@@ -3,14 +3,15 @@
 # Base stuff we need
 POGOPKG=com.nianticlabs.pokemongo
 CONFIGFILE='/data/local/tmp/emagisk.config'
-setprop net.dns1 1.1.1.1 && setprop net.dns2 8.8.8.8
+DEFAULT_DNS="1.1.1.1,8.8.8.8"
+
 # Check if $CONFIGFILE exists and has data. Pulls data and checks the RDM connection status.
 # Data stored as global variables using export
 get_config() {
 	if [[ -s $CONFIGFILE ]]; then
 		log -p i -t eMagiskATVService "$CONFIGFILE exists and has data. Data will be pulled."
 		source $CONFIGFILE
-		export rdm_user rdm_password rdm_backendURL discord_webhook timezone autoupdate
+		export rdm_user rdm_password rdm_backendURL discord_webhook timezone autoupdate dns
 	else
 		log -p i -t eMagiskATVService "Failed to pull the config file. Make sure $($CONFIGFILE) exists and has the correct data."
 	fi
@@ -18,10 +19,36 @@ get_config() {
 
 get_config
 
+# Use the DNS from config if available; otherwise, use the default
+if [[ -n "$dns" ]]; then
+    log -p i -t eMagiskATVService "Using custom DNS from config: $dns"
+    DNS_VALUES="$dns"
+else
+    log -p i -t eMagiskATVService "Using default DNS: $DEFAULT_DNS"
+    DNS_VALUES="$DEFAULT_DNS"
+fi
+
+# Apply DNS settings
+IFS=',' read -r dns1 dns2 <<< "$DNS_VALUES"
+setprop net.dns1 "$dns1"
+setprop net.dns2 "$dns2"
+
 # Check for the mitm pkg
 
-get_mitm_pkg() { # This function is so hardcoded that I'm allergic to it 
-	busybox ps aux | grep -E -C0 "pokemod|gocheats|sy1vi3" | grep -C0 -v grep | awk -F ' ' '/com.pokemod/{print $NF} /com.sy1vi3/{print $NF} /com.nianticlabs.pokemongo.ares/{print $NF} /com.gocheats.launcher/{print $NF}' | grep -E -C0 "gocheats|pokemod|sy1vi3" | sed -e 's/^[0-9]*://' -e 's@:.*@@g' | sort | uniq
+get_mitm_pkg() { 
+    # This function is so hardcoded that I'm allergic to it 
+
+    busybox ps aux | grep -E -C0 "pokemod|gocheats|sy1vi3|ares" | \
+        grep -C0 -v grep | \
+        awk -F ' ' '
+            /com.pokemod/ { print $NF } 
+            /com.sy1vi3/ { print $NF } 
+            /com.nianticlabs.pokemongo.ares/ { print $NF } 
+            /com.gocheats.launcher/ { print $NF }
+        ' | \
+        grep -E -C0 "gocheats|pokemod|sy1vi3|ares" | \
+        sed -e 's/^[0-9]*://' -e 's@:.*@@g' | \
+        sort | uniq
 }
 
 check_mitmpkg() {
@@ -426,30 +453,27 @@ if [ -e "$adb_keys_file" ]; then
 fi
 
 # Download cacert to use certs instead of curl -k 
-
 cacert_path="/data/local/tmp/cacert.pem"
 if [ ! -f "$cacert_path" ]; then
 	log -p i -t eMagiskATVService "Downloading cacert.pem..."
 	curl -k -o "$cacert_path" https://curl.se/ca/cacert.pem
 fi
 
+# Check for updates
+if [ "$autoupdate" = "true" ]; then
+  log -p i -t eMagiskATVService "[AUTOUPDATE] Checking for new updates"
+  autoupdate
+else
+  log -p i -t eMagiskATVService "[AUTOUPDATE] Disabled. Skipping"
+fi
 
 # Health Service
-
 if result=$(check_mitmpkg); then
 	(
 		log -p i -t eMagiskATVService "eMagisk: Astu's fork. Starting health check service in 4 minutes... MITM: $MITMPKG"
 		counter=0
 		rdmDeviceID=1
 		log -p i -t eMagiskATVService "Start counter at $counter"
-		# get_config
-		# Check for updates
-		if [ "$autoupdate" = "true" ]; then
-		  log -p i -t eMagiskATVService "[AUTOUPDATE] Checking for new updates"
-		  autoupdate
-		else
-		  log -p i -t eMagiskATVService "[AUTOUPDATE] Disabled. Skipping"
-		fi
 		webhook "Booting"
 		while :; do  
 			sleep_duration=120
